@@ -11,7 +11,7 @@ async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
       .setName('roll')
-      .setDescription('Roll dice! e.g. /roll d20 or /roll d6 10')
+      .setDescription('Roll dice! e.g. /roll d20 or /roll d6 10 +5')
       .addStringOption(option =>
         option
           .setName('dice')
@@ -34,6 +34,12 @@ async function registerCommands() {
           .setRequired(false)
           .setMinValue(1)
           .setMaxValue(500)
+      )
+      .addIntegerOption(option =>
+        option
+          .setName('modifier')
+          .setDescription('Add or subtract from the total, e.g. 5 or -3')
+          .setRequired(false)
       ),
   ].map(cmd => cmd.toJSON());
 
@@ -52,13 +58,14 @@ function rollDie(sides) {
   return Math.floor(Math.random() * sides) + 1;
 }
 
-function formatResults(diceType, sides, rolls) {
-  const total = rolls.reduce((a, b) => a + b, 0);
+function formatResults(diceType, rolls, modifier) {
+  const rollTotal = rolls.reduce((a, b) => a + b, 0);
+  const finalTotal = rollTotal + modifier;
   const count = rolls.length;
-  const lines = rolls.map((r, i) => `  Roll ${i + 1}: **${r}**`);
+  const lines = rolls.map((r, i) => `  Roll ${i + 1}: ${r}`);
 
   const chunks = [];
-  let current = `🎲 **Rolling ${count}x ${diceType}**\n\n`;
+  let current = `Rolling ${count}x ${diceType}${modifier !== 0 ? (modifier > 0 ? ` +${modifier}` : ` ${modifier}`) : ''}\n\n`;
 
   for (const line of lines) {
     if ((current + line + '\n').length > 1800) {
@@ -68,23 +75,28 @@ function formatResults(diceType, sides, rolls) {
     current += line + '\n';
   }
 
-  const min = Math.min(...rolls);
-  const max = Math.max(...rolls);
-  const avg = (total / count).toFixed(2);
+  current += `\n--------------------\n`;
+  current += `Dice Total: ${rollTotal}\n`;
 
-  current += `\n━━━━━━━━━━━━━━━━━━━━\n`;
-  current += `📊 **Results for ${count}x ${diceType}**\n`;
-  current += `  Total: **${total}**\n`;
+  if (modifier !== 0) {
+    current += `Modifier: ${modifier > 0 ? '+' : ''}${modifier}\n`;
+    current += `Final Total: ${finalTotal}\n`;
+  } else {
+    current += `Total: ${rollTotal}\n`;
+  }
+
   if (count > 1) {
-    current += `  Average: **${avg}**\n`;
-    current += `  Min: **${min}** | Max: **${max}**\n`;
+    const min = Math.min(...rolls);
+    const max = Math.max(...rolls);
+    const avg = (rollTotal / count).toFixed(2);
+    current += `Average: ${avg} | Min: ${min} | Max: ${max}\n`;
   }
 
   chunks.push(current);
   return chunks;
 }
 
-client.on('ready', () => {
+client.on('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
@@ -94,17 +106,18 @@ client.on('interactionCreate', async interaction => {
 
   const diceStr = interaction.options.getString('dice');
   const count = interaction.options.getInteger('count') ?? 1;
+  const modifier = interaction.options.getInteger('modifier') ?? 0;
   const sides = parseInt(diceStr.slice(1));
 
   if (!VALID_DICE.includes(sides)) {
     return interaction.reply({
-      content: `❌ Invalid dice type "${diceStr}".`,
+      content: `Invalid dice type "${diceStr}".`,
       ephemeral: true,
     });
   }
 
   const rolls = Array.from({ length: count }, () => rollDie(sides));
-  const chunks = formatResults(diceStr, sides, rolls);
+  const chunks = formatResults(diceStr, rolls, modifier);
 
   await interaction.deferReply();
   await interaction.editReply(chunks[0]);
